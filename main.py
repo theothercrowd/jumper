@@ -25,7 +25,7 @@ CONFIG: Dict = {
     "max_sleep_sec": 6,
 
     # bridge this % of wallet's token balance
-    "bridge_percent": 99.99,          # e.g. 50 → half the balance
+    "bridge_percent": 99.7,          # e.g. 50 → half the balance
 
     # slippage for LI.FI quote (percent)
     "slippage": 0.1,
@@ -42,8 +42,6 @@ CONFIG: Dict = {
         534352: "https://scroll-mainnet.public.blastapi.io",   # Scroll
         167000: "https://rpc.taiko.xyz",                       # Taiko
         8453: "https://mainnet.base.org",                      # Base
-
-        # add more as needed
     },
 
     # choose source and destination chains
@@ -58,6 +56,7 @@ CONFIG: Dict = {
 # ──────────────────────────── CONSTANTS ─────────────────────────── #
 
 WALLETS_FILE   = "wallets.txt"
+PROXIES_FILE   = "proxy.txt"
 BASE_URL       = "https://li.quest/v1"
 QUOTE_URL      = f"{BASE_URL}/quote"
 CHAINS_URL     = f"{BASE_URL}/chains"
@@ -109,11 +108,14 @@ class JumperQuote:
         if self.to_addr != self.from_addr:
             params["toAddress"] = self.to_addr
         
-        print(f"  ↪ Requesting quote with params: {params}")
+        # Get random proxy for this request
+        proxies = get_random_proxy()
+        proxy_info = f" via proxy {list(proxies.values())[0].split('@')[1] if proxies else 'none'}" if proxies else " (no proxy)"
+        print(f"  ↪ Requesting quote{proxy_info}")
         
         try:
             headers = {'accept': 'application/json'}
-            r = requests.get(QUOTE_URL, params=params, headers=headers, timeout=30)
+            r = requests.get(QUOTE_URL, params=params, headers=headers, timeout=30, proxies=proxies)
             
             if r.status_code == 404:
                 raise requests.exceptions.HTTPError(f"404 - No bridge available for {self.from_chain} -> {self.to_chain}")
@@ -259,10 +261,33 @@ def load_private_keys(path: str = WALLETS_FILE) -> List[str]:
     return [line.strip() for line in Path(path).read_text().splitlines() if line.strip()]
 
 
+def load_proxies(path: str = PROXIES_FILE) -> List[str]:
+    """Load proxies from file in format: http://login:pass@ip:port"""
+    try:
+        return [line.strip() for line in Path(path).read_text().splitlines() if line.strip()]
+    except FileNotFoundError:
+        print(f"  ↪ Warning: {path} not found, running without proxies")
+        return []
+
+
+def get_random_proxy() -> Optional[Dict[str, str]]:
+    """Get a random proxy for requests"""
+    proxies_list = load_proxies()
+    if not proxies_list:
+        return None
+    
+    proxy_url = random.choice(proxies_list)
+    return {
+        'http': proxy_url,
+        'https': proxy_url
+    }
+
+
 def check_chain_support(chain_id: int) -> bool:
     """Check if a chain is supported by LI.FI"""
     try:
-        r = requests.get(CHAINS_URL, timeout=10)
+        proxies = get_random_proxy()
+        r = requests.get(CHAINS_URL, timeout=10, proxies=proxies)
         r.raise_for_status()
         chains = r.json()
         
